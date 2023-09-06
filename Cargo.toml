@@ -1,0 +1,9 @@
+[package]
+name = "enchanted-beans"
+version = "0.0.0"
+edition = "2021"
+description = "A Rust implementation of a beanstalkd-compatible work queue"
+repository = "https://github.com/SeanGeb/enchanted-beans"
+license = "MIT"
+
+[dependencies]
