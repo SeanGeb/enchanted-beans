@@ -7,3 +7,5 @@ repository = "https://github.com/SeanGeb/enchanted-beans"
 license = "MIT"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
