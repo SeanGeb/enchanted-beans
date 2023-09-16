@@ -149,8 +149,9 @@ async fn handle_conn(
             .tuple_windows::<(_, _)>()
             .position(|x| x == (&b'\r', &b'\n'))
         {
-            // This should be a complete command.
-            let cmd = buf.split_to(maybe_crlf_from + eoc + 2);
+            // This should be a complete command. Freeze the result to make it
+            // read-only.
+            let cmd = buf.split_to(maybe_crlf_from + eoc + 2).freeze();
             // Drop trailing b"\r\n".
             let cmd = &cmd[0..cmd.len() - 2];
             trace!(cmd = bytes_to_human_str(cmd), "processing command");
@@ -172,6 +173,15 @@ async fn handle_conn(
             // commands from the start of the unread buffer section.
             maybe_crlf_from = 0;
         }
+
+        // Flush any buffered packets once we've written out the one or more
+        // responses. This provides a pipelined response to a pipelined request.
+        // NB: flush() appears not to be implemented for TCPStreams, but this
+        // should provide forward-compatibility for other transports.
+        select! {
+            r = conn.flush() => r?,
+            _ = cancel.cancelled() => return Ok(()),
+        };
 
         // Handle a client disconnect here, so a client that sends a command
         // then immediately closes the sending side of its connection has its
