@@ -11,7 +11,6 @@ use enchanted_beans::types::serialisable::BeanstalkSerialisable;
 use itertools::Itertools;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::signal::ctrl_c;
 use tokio::sync::mpsc;
 use tokio::{select, signal};
 use tokio_util::sync::CancellationToken;
@@ -80,7 +79,7 @@ async fn begin(
     loop {
         let conn = match select! {
             accept = listener.accept() => accept,
-            _ = ctrl_c() => break,
+            _ = cancel.cancelled() => break,
         } {
             Ok((conn, _)) => conn,
             Err(error) => {
