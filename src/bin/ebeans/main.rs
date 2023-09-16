@@ -126,19 +126,25 @@ async fn handle_conn(
             _ = cancel.cancelled() => return Ok(()),
         };
 
-        // We slice and dice here to avoid re-reading all but the last byte
+        // We slice and dice buf here to avoid re-reading all but the last byte
         // of the part of the command we've already seen, keeping O(bytes_read)
         // behaviour.
 
         // We need to scan from one position earlier than the start of the
         // newest bytes in case we received a \r then \n on the next read.
+        // We also need to be able to correctly handle command pipelining, where
+        // multiple commands are sent in the same packet (e.g. "use tube"
+        // followed by a "stats-tube" as b"use tube\r\nstats-tube\r\n").
+
         // Testing: all the following should work.
         // * b"hello" + b"world\r\n"
         // * b"hello" + b"world\r" + b"\n"
         // * b"hello" + b"world" + b"\r" + b"\n"
-        let maybe_crlf_from =
+        // * b"hello\r\nworld\r\n"
+        let mut maybe_crlf_from =
             buf.len().checked_sub(bytes_read + 1).unwrap_or(0);
-        if let Some(eoc) = buf
+
+        while let Some(eoc) = buf
             .iter()
             .skip(maybe_crlf_from)
             .tuple_windows::<(_, _)>()
@@ -162,6 +168,10 @@ async fn handle_conn(
                 n = conn.write_all_buf(&mut resp_buf) => n?,
                 _ = cancel.cancelled() => return Ok(()),
             };
+
+            // Zero out the maybe_crlf_from position so we restart scanning for
+            // commands from the start of the unread buffer section.
+            maybe_crlf_from = 0;
         }
 
         // Handle a client disconnect here, so a client that sends a command
