@@ -1,6 +1,6 @@
 use std::ascii;
 
-pub(crate) fn bytes_to_human_str(input: &[u8]) -> String {
+pub fn bytes_to_human_str(input: &[u8]) -> String {
     String::from_utf8(
         input
             .iter()

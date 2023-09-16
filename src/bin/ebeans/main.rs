@@ -1,15 +1,15 @@
 mod args;
-mod util;
 
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use bytes::BytesMut;
 use clap::Parser;
+use enchanted_beans::line_reader::LineReader;
+use enchanted_beans::parser::ParsingError;
 use enchanted_beans::types::protocol::BeanstalkCommand;
 use enchanted_beans::types::serialisable::BeanstalkSerialisable;
-use itertools::Itertools;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use enchanted_beans::util::bytes_to_human_str;
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::{select, signal};
@@ -17,7 +17,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace, warn, Level};
 
 use crate::args::Args;
-use crate::util::bytes_to_human_str;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
@@ -117,77 +116,49 @@ async fn handle_conn(
     cancel: CancellationToken,
     conn: &mut TcpStream,
 ) -> Result<()> {
-    let mut buf = BytesMut::with_capacity(224);
+    // Split conn into read and write halves, where the read half uses our
+    // LineReader.
+    let (r, mut w) = conn.split();
+    let mut r: LineReader<_> = r.into();
 
+    // Keep taking lines and parsing and processing them.
     loop {
-        let bytes_read = select! {
-            n = conn.read_buf(&mut buf) => n.context("reading")?,
-            _ = cancel.cancelled() => return Ok(()),
-        };
+        let line = select!(
+           x = r.read_line() => match x? {
+                Some(x) => x,
+                None => return Ok(()),
+           },
+           _ = cancel.cancelled() => return Ok(()),
+        );
 
-        // We slice and dice buf here to avoid re-reading all but the last byte
-        // of the part of the command we've already seen, keeping O(bytes_read)
-        // behaviour.
+        trace!(line = bytes_to_human_str(&line), "processing command");
 
-        // We need to scan from one position earlier than the start of the
-        // newest bytes in case we received a \r then \n on the next read.
-        // We also need to be able to correctly handle command pipelining, where
-        // multiple commands are sent in the same packet (e.g. "use tube"
-        // followed by a "stats-tube" as b"use tube\r\nstats-tube\r\n").
+        let cmd: Result<BeanstalkCommand, ParsingError> =
+            (&line as &[u8]).try_into();
 
-        // Testing: all the following should work.
-        // * b"hello" + b"world\r\n"
-        // * b"hello" + b"world\r" + b"\n"
-        // * b"hello" + b"world" + b"\r" + b"\n"
-        // * b"hello\r\nworld\r\n"
-        let mut maybe_crlf_from =
-            buf.len().checked_sub(bytes_read + 1).unwrap_or(0);
-
-        while let Some(eoc) = buf
-            .iter()
-            .skip(maybe_crlf_from)
-            .tuple_windows::<(_, _)>()
-            .position(|x| x == (&b'\r', &b'\n'))
-        {
-            // This should be a complete command. Freeze the result to make it
-            // read-only.
-            let cmd = buf.split_to(maybe_crlf_from + eoc + 2).freeze();
-            // Drop trailing b"\r\n".
-            let cmd = &cmd[0..cmd.len() - 2];
-            trace!(cmd = bytes_to_human_str(cmd), "processing command");
-
-            let resp = match TryInto::<BeanstalkCommand>::try_into(cmd) {
-                Ok(c) => b"CMD_OK\r\n".to_vec(),
-                Err(e) => e.serialise_beanstalk(),
-            };
-
-            // Slightly convoluted, but ensures we write out the buffer properly
-            // with cancel safety.
-            let mut resp_buf = &resp[..];
-            select! {
-                n = conn.write_all_buf(&mut resp_buf) => n?,
+        // Slightly convoluted, but ensures we write out the buffer properly
+        // with cancel safety.
+        match cmd {
+            Ok(_cmd) => select! {
+                x = w.write_all(b"CMD_OK\r\n") => x,
                 _ = cancel.cancelled() => return Ok(()),
-            };
-
-            // Zero out the maybe_crlf_from position so we restart scanning for
-            // commands from the start of the unread buffer section.
-            maybe_crlf_from = 0;
-        }
+            },
+            Err(error) => {
+                let resp = error.serialise_beanstalk();
+                select! {
+                    x = w.write_all(&resp) => x,
+                    _ = cancel.cancelled() => return Ok(()),
+                }
+            },
+        }?;
 
         // Flush any buffered packets once we've written out the one or more
         // responses. This provides a pipelined response to a pipelined request.
         // NB: flush() appears not to be implemented for TCPStreams, but this
         // should provide forward-compatibility for other transports.
         select! {
-            r = conn.flush() => r?,
+            x = w.flush() => x?,
             _ = cancel.cancelled() => return Ok(()),
         };
-
-        // Handle a client disconnect here, so a client that sends a command
-        // then immediately closes the sending side of its connection has its
-        // last command acknowledged.
-        if bytes_read == 0 {
-            return Ok(());
-        }
     }
 }
