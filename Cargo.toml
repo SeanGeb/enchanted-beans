@@ -7,5 +7,13 @@ repository = "https://github.com/SeanGeb/enchanted-beans"
 license = "MIT"
 
 [dependencies]
+anyhow = "1"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+itertools = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "parking_lot"] }

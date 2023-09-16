@@ -2,9 +2,10 @@
 use std::fmt;
 
 use crate::types::protocol::BeanstalkCommand;
+use crate::types::serialisable::BeanstalkSerialisable;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ParsingError {
+pub enum ParsingError {
     BadFormat,
     UnknownCommand,
 }
@@ -15,6 +16,15 @@ impl fmt::Display for ParsingError {
             Self::BadFormat => "bad format",
             Self::UnknownCommand => "unknown command",
         })
+    }
+}
+
+impl BeanstalkSerialisable for ParsingError {
+    fn serialise_beanstalk(&self) -> Vec<u8> {
+        match self {
+            ParsingError::BadFormat => b"BAD_FORMAT\r\n".to_vec(),
+            ParsingError::UnknownCommand => b"UNKNOWN_COMMAND\r\n".to_vec(),
+        }
     }
 }
 

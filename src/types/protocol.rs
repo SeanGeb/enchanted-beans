@@ -5,7 +5,7 @@ use super::states::JobState;
 
 /// A command sent by the client to the server.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum BeanstalkCommand {
+pub enum BeanstalkCommand {
     /// Places a job onto the currently `use`d queue.
     ///
     /// On the wire: `put <pri> <delay> <ttr>`
@@ -151,7 +151,7 @@ pub(crate) enum BeanstalkCommand {
 }
 
 /// All possible response types to a `BeanstalkRequest`.
-pub(crate) enum BeanstalkResponse {
+pub enum BeanstalkResponse {
     /// Indicates the server cannot handle a job due to memory pressure. Can be
     /// sent in response to any command.
     ///
@@ -369,7 +369,7 @@ impl BeanstalkSerialisable for BeanstalkResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct JobStats {
+pub struct JobStats {
     /// job ID
     pub(crate) id: u64,
     /// tube containing job
@@ -405,7 +405,7 @@ pub(crate) struct JobStats {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct TubeStats {
+pub struct TubeStats {
     /// tube name
     pub(crate) name: Vec<u8>,
     /// number of jobs in ready state with priority < 1024
@@ -450,7 +450,7 @@ pub(crate) struct TubeStats {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct ServerStats {
+pub struct ServerStats {
     /// number of ready jobs with priority < 1024
     #[serde(rename = "current-jobs-urgent")]
     pub(crate) current_jobs_urgent: u64,
