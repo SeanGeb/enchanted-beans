@@ -1,6 +1,8 @@
 mod args;
 mod util;
 
+use std::process::ExitCode;
+
 use anyhow::{Context, Result};
 use bytes::BytesMut;
 use clap::Parser;
@@ -13,13 +15,13 @@ use tokio::signal::ctrl_c;
 use tokio::sync::mpsc;
 use tokio::{select, signal};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, instrument, trace, warn, Level};
+use tracing::{debug, error, info, instrument, trace, warn, Level};
 
 use crate::args::Args;
 use crate::util::bytes_to_human_str;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> ExitCode {
     let args = Args::parse();
 
     // Logging
@@ -29,6 +31,11 @@ async fn main() -> Result<()> {
             .init();
     } else {
         tracing_subscriber::fmt().json().init();
+    }
+
+    if let Some(_wal_dir) = args.wal_dir {
+        error!("unsupported configuration: WAL not yet implemented");
+        return ExitCode::from(2);
     }
 
     // Cancellation and termination channel.
@@ -47,6 +54,24 @@ async fn main() -> Result<()> {
 
     let (shutdown_hold, mut shutdown_wait) = mpsc::channel::<()>(1);
 
+    let exit_code = if let Err(error) = begin(args, cancel, shutdown_hold).await
+    {
+        error!(%error, "encountered runtime error");
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    };
+
+    shutdown_wait.recv().await;
+
+    exit_code
+}
+
+async fn begin(
+    args: Args,
+    cancel: CancellationToken,
+    shutdown_hold: mpsc::Sender<()>,
+) -> Result<()> {
     let listener = TcpListener::bind((args.listen, args.port)).await?;
     info!(addr = %listener.local_addr()?, "listening");
 
@@ -66,10 +91,6 @@ async fn main() -> Result<()> {
 
         tokio::spawn(begin_handle(cancel.clone(), shutdown_hold.clone(), conn));
     }
-
-    drop(shutdown_hold);
-
-    shutdown_wait.recv().await;
 
     Ok(())
 }
