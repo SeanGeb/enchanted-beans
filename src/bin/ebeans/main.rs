@@ -37,8 +37,8 @@ async fn main() -> ExitCode {
     }
 
     // Cancellation and termination channel.
-    // TODO: this termination channel is a mpsc - so could be used to provide
-    // durability.
+    // TODO: this termination channel is a mpsc - so could be used when
+    // implementing durability as a stream of events.
     let cancel = CancellationToken::new();
     {
         let cancel = cancel.clone();
@@ -50,14 +50,22 @@ async fn main() -> ExitCode {
         });
     }
 
+    let listener = match TcpListener::bind((args.listen, args.port)).await {
+        Ok(l) => l,
+        Err(error) => {
+            error!(%error, "failed to listen for connections");
+            return ExitCode::from(111);
+        },
+    };
+
     let (shutdown_hold, mut shutdown_wait) = mpsc::channel::<()>(1);
 
-    let exit_code = if let Err(error) = begin(args, cancel, shutdown_hold).await
-    {
-        error!(%error, "encountered runtime error");
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
+    let exit_code = match begin(cancel, shutdown_hold, listener).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            error!(%error, "encountered runtime error");
+            ExitCode::FAILURE
+        },
     };
 
     shutdown_wait.recv().await;
@@ -66,11 +74,10 @@ async fn main() -> ExitCode {
 }
 
 async fn begin(
-    args: Args,
     cancel: CancellationToken,
     shutdown_hold: mpsc::Sender<()>,
+    listener: TcpListener,
 ) -> Result<()> {
-    let listener = TcpListener::bind((args.listen, args.port)).await?;
     info!(addr = %listener.local_addr()?, "listening");
 
     // Accept incoming connections until an exit signal is sent, and handle each
